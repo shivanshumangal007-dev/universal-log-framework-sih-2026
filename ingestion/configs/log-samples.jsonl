@@ -1,0 +1,8 @@
+{"level":"info","msg":"service started","service":"api","timestamp":"2026-09-03T10:00:00Z"}
+<34>Oct 11 22:14:15 mymachine su: 'su root' failed for lonvick on /dev/pts/8
+<165>Aug 24 05:34:00 Cisconame syslog: %%SEC-6-IPACCESSLOGP: list 101 denied tcp 10.48.66.23(4371) -> 10.48.66.24(80), 1 packet
+CEF:0|Security|threatmanager|1.0|100|worm successfully stopped|10|src=10.0.0.1 dst=10.0.0.2 spt=1232
+name,age,city
+John Doe,30,New York
+Jane Smith,25,Los Angeles
+2026-09-03 12:34:56 [ERROR] connection timeout to db01.internal

@@ -1,0 +1,44 @@
+version: "3.8"
+
+services:
+  collector:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile.collector
+    container_name: log-collector
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_RAW_TOPIC=raw-logs
+      - KAFKA_PARSED_TOPIC=parsed-logs
+      - SYSLOG_BIND=0.0.0.0:514
+      - FILETAIL_PATHS=/var/log/sample.log
+    ports:
+      - "514:514/udp"
+    volumes:
+      - ./sample-logs:/var/log
+    depends_on:
+      - kafka
+    networks:
+      - log-network
+
+  parser:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile.parser
+    container_name: log-parser
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_RAW_TOPIC=raw-logs
+      - KAFKA_PARSED_TOPIC=parsed-logs
+      - KAFKA_GROUP_ID=log-parser-group
+    depends_on:
+      - kafka
+      - collector
+    networks:
+      - log-network
+    deploy:
+      replicas: 2
+
+networks:
+  log-network:
+    driver: bridge
