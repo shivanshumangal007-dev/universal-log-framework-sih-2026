@@ -27,6 +27,7 @@ yarn-error.log*
 
 # ── Infra / Docker data (never commit runtime data) ──
 infra/ch_data/
+infra/ch_data.old/
 infra/ch_logs/
 *.env
 .env.local

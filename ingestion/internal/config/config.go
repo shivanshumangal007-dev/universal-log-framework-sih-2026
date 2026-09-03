@@ -43,6 +43,22 @@ type Parser struct {
 	Kafka Kafka
 }
 
+// ClickHouseConfig holds ClickHouse connection settings.
+type ClickHouseConfig struct {
+	Addr          string
+	Database      string
+	Username      string
+	Password      string
+	BatchSize     int
+	FlushInterval time.Duration
+}
+
+// Sink holds the full sink config.
+type Sink struct {
+	Kafka      Kafka
+	ClickHouse ClickHouseConfig
+}
+
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -110,6 +126,28 @@ func LoadParser() Parser {
 			GroupID:      envOr("KAFKA_GROUP_ID", "log-parser-group"),
 			ReadTimeout:  envDuration("KAFKA_READ_TIMEOUT", 10*time.Second),
 			WriteTimeout: envDuration("KAFKA_WRITE_TIMEOUT", 10*time.Second),
+		},
+	}
+}
+
+// LoadSink returns Sink populated from env vars with defaults.
+func LoadSink() Sink {
+	return Sink{
+		Kafka: Kafka{
+			Brokers:      []string{envOr("KAFKA_BROKERS", "localhost:9092")},
+			RawTopic:     envOr("KAFKA_RAW_TOPIC", "raw-logs"),
+			ParsedTopic:  envOr("KAFKA_PARSED_TOPIC", "parsed-logs"),
+			GroupID:      envOr("KAFKA_SINK_GROUP_ID", "clickhouse-sink"),
+			ReadTimeout:  envDuration("KAFKA_READ_TIMEOUT", 10*time.Second),
+			WriteTimeout: envDuration("KAFKA_WRITE_TIMEOUT", 10*time.Second),
+		},
+		ClickHouse: ClickHouseConfig{
+			Addr:          envOr("CLICKHOUSE_ADDR", "localhost:9000"),
+			Database:      envOr("CLICKHOUSE_DATABASE", "logs"),
+			Username:      envOr("CLICKHOUSE_USERNAME", "default"),
+			Password:      envOr("CLICKHOUSE_PASSWORD", "changeme"),
+			BatchSize:     envInt("CLICKHOUSE_BATCH_SIZE", 100),
+			FlushInterval: envDuration("CLICKHOUSE_FLUSH_INTERVAL", 2*time.Second),
 		},
 	}
 }

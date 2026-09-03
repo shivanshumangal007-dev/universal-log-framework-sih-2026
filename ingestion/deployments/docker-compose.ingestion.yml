@@ -39,6 +39,26 @@ services:
     deploy:
       replicas: 2
 
+  sink:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile.sink
+    container_name: log-sink
+    environment:
+      - KAFKA_BROKERS=kafka:9092
+      - KAFKA_PARSED_TOPIC=parsed-logs
+      - KAFKA_SINK_GROUP_ID=clickhouse-sink
+      - CLICKHOUSE_ADDR=ch-server:9000
+      - CLICKHOUSE_DATABASE=logs
+      - CLICKHOUSE_USERNAME=default
+      - CLICKHOUSE_PASSWORD=changeme
+    depends_on:
+      - kafka
+      - clickhouse
+      - parser
+    networks:
+      - log-network
+
 networks:
   log-network:
     driver: bridge

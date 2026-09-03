@@ -1,7 +1,7 @@
 version: "3.8"
 services:
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:24.11
     container_name: ch-server
     ports:
       - "8123:8123"   # HTTP interface
@@ -17,9 +17,15 @@ services:
       nofile:
         soft: 262144
         hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   kafka:
-    image: apache/kafka:latest
+    image: apache/kafka:3.9.0
     container_name: kafka
     ports:
       - "9092:9092"

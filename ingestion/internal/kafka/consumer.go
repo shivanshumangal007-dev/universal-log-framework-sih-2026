@@ -19,10 +19,15 @@ type Consumer struct {
 
 // NewConsumer creates a consumer for the raw-logs topic.
 func NewConsumer(cfg config.Kafka) *Consumer {
+	return NewConsumerForTopic(cfg, cfg.RawTopic)
+}
+
+// NewConsumerForTopic creates a consumer for an arbitrary topic.
+func NewConsumerForTopic(cfg config.Kafka, topic string) *Consumer {
 	return &Consumer{
 		reader: kafka.NewReader(kafka.ReaderConfig{
 			Brokers:     cfg.Brokers,
-			Topic:       cfg.RawTopic,
+			Topic:       topic,
 			GroupID:     cfg.GroupID,
 			MinBytes:    1,
 			MaxBytes:    10e6,

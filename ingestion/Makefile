@@ -1,12 +1,13 @@
-.PHONY: all build collector parser fmt vet test clean docker-build run-local
+.PHONY: all build collector parser sink fmt vet test clean docker-build run-local
 
 BINARY_DIR=./bin
 COLLECTOR_BIN=$(BINARY_DIR)/collector
 PARSER_BIN=$(BINARY_DIR)/parser
+SINK_BIN=$(BINARY_DIR)/sink
 
 all: build
 
-build: collector parser
+build: collector parser sink
 
 collector:
 	@echo "Building collector..."
@@ -15,6 +16,10 @@ collector:
 parser:
 	@echo "Building parser..."
 	go build -o $(PARSER_BIN) ./cmd/parser
+
+sink:
+	@echo "Building sink..."
+	go build -o $(SINK_BIN) ./cmd/sink
 
 fmt:
 	go fmt ./...
