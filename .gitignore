@@ -1,0 +1,45 @@
+# ── Go (ingestion/) ─────────────────────────
+ingestion/bin/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# ── Python (inference/) ─────────────────────
+inference/venv/
+inference/__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# ── Node / React (dashboard/) ───────────────
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Infra / Docker data (never commit runtime data) ──
+infra/ch_data/
+infra/ch_logs/
+*.env
+.env.local
+
+# ── OS / Editor junk ─────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# ── Docs build artifacts (keep the source, not exports) ──
+docs/*.pdf
+
+# ── Logs ─────────────────────────────────────
+*.log

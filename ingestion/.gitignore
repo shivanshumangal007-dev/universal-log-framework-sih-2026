@@ -1,0 +1,54 @@
+# Binaries and build output
+/bin/
+/build/
+/dist/
+/out/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go coverage, profiling, and fuzzing output
+coverage/
+cover.out
+coverage.out
+*.prof
+*.pprof
+*.trace
+/testdata/fuzz/
+
+# Go workspace files
+/go.work
+/go.work.sum
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+*.local
+
+# Dependency caches and vendored dependencies
+/pkg/mod/
+/vendor/
+
+# Editor and IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+tmp/
+temp/
