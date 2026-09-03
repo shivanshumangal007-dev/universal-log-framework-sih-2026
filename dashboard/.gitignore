@@ -1,6 +1,0 @@
-dashboard/node_modules/
-dashboard/dist/
-dashboard/.vite/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
