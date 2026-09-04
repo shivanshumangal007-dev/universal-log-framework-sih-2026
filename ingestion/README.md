@@ -278,13 +278,13 @@ curl -sS -u default:changeme \
 
 ### Parser
 
-| Variable               | Default            | Description                                  |
-| ---------------------- | ------------------ | -------------------------------------------- |
-| `KAFKA_BROKERS`        | `localhost:9092`   | Kafka broker list                            |
-| `KAFKA_RAW_TOPIC`      | `raw-logs`         | Topic to consume                             |
-| `KAFKA_PARSED_TOPIC`   | `parsed-logs`      | Topic for successfully parsed events         |
-| `KAFKA_UNKNOWN_TOPIC`  | `unknown-logs`     | Topic for events that match no known format  |
-| `KAFKA_GROUP_ID`       | `log-parser-group` | Consumer group                               |
+| Variable              | Default            | Description                                 |
+| --------------------- | ------------------ | ------------------------------------------- |
+| `KAFKA_BROKERS`       | `localhost:9092`   | Kafka broker list                           |
+| `KAFKA_RAW_TOPIC`     | `raw-logs`         | Topic to consume                            |
+| `KAFKA_PARSED_TOPIC`  | `parsed-logs`      | Topic for successfully parsed events        |
+| `KAFKA_UNKNOWN_TOPIC` | `unknown-logs`     | Topic for events that match no known format |
+| `KAFKA_GROUP_ID`      | `log-parser-group` | Consumer group                              |
 
 ### Sink
 
@@ -302,15 +302,15 @@ curl -sS -u default:changeme \
 
 ### Inferred sink
 
-| Variable                | Default           | Description                                  |
-| ----------------------- | ----------------- | -------------------------------------------- |
-| `KAFKA_BROKERS`         | `localhost:9092`  | Kafka broker list                            |
-| `KAFKA_INFERRED_TOPIC`  | `inferred-logs`   | Topic to consume                             |
-| `CONFIDENCE_THRESHOLD`  | `0.75`            | Minimum confidence stored as inferred output |
-| `CLICKHOUSE_ADDR`       | `localhost:9000`  | Native TCP address                           |
-| `CLICKHOUSE_DATABASE`   | `logs`            | Database name                                |
-| `CLICKHOUSE_USERNAME`   | `default`         | Username                                     |
-| `CLICKHOUSE_PASSWORD`   | `changeme`        | Password                                     |
+| Variable               | Default          | Description                                  |
+| ---------------------- | ---------------- | -------------------------------------------- |
+| `KAFKA_BROKERS`        | `localhost:9092` | Kafka broker list                            |
+| `KAFKA_INFERRED_TOPIC` | `inferred-logs`  | Topic to consume                             |
+| `CONFIDENCE_THRESHOLD` | `0.75`           | Minimum confidence stored as inferred output |
+| `CLICKHOUSE_ADDR`      | `localhost:9000` | Native TCP address                           |
+| `CLICKHOUSE_DATABASE`  | `logs`           | Database name                                |
+| `CLICKHOUSE_USERNAME`  | `default`        | Username                                     |
+| `CLICKHOUSE_PASSWORD`  | `changeme`       | Password                                     |
 
 ## ClickHouse Schema
 
