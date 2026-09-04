@@ -111,14 +111,27 @@ docker compose -f infra/docker-compose.yml up -d kafka clickhouse
 
 Do not use `docker compose down -v` as a substitute for removing `infra/ch_data`; `ch_data` is a bind-mounted directory and is not deleted by that command.
 
-### 3. Build all binaries
+### 3. Create Kafka topics
+
+Create the topics the pipeline expects:
+
+```bash
+docker exec kafka /opt/kafka/bin/kafka-topics.sh \
+  --create --if-not-exists \
+  --topic unknown-logs \
+  --bootstrap-server localhost:9092
+```
+
+> The `raw-logs` and `parsed-logs` topics are created automatically by the collector and parser on first use when using Kafka 3.x with auto-create enabled. `unknown-logs` may also auto-create, but creating it explicitly ensures it exists before the parser starts.
+
+### 4. Build all binaries
 
 ```bash
 cd ingestion
 make build
 ```
 
-### 4. Run the collector (Terminal 1)
+### 5. Run the collector (Terminal 1)
 
 Run from the `ingestion` directory. Keep this terminal open:
 
@@ -128,7 +141,7 @@ KAFKA_BROKERS=localhost:9092 ./bin/collector
 
 The collector listens for syslog on UDP port `514` and tails `configs/test.log`.
 
-### 5. Run the parser (Terminal 2)
+### 6. Run the parser (Terminal 2)
 
 Open a second terminal and run:
 
@@ -146,7 +159,7 @@ KAFKA_GROUP_ID=parser-test-$(date +%s) \
 ./bin/parser
 ```
 
-### 6. Run the ClickHouse sink (Terminal 3)
+### 7. Run the ClickHouse sink (Terminal 3)
 
 Open a third terminal and run:
 
@@ -162,7 +175,7 @@ KAFKA_BROKERS=localhost:9092 \
 
 The sink creates `logs.parsed_logs` automatically and commits Kafka messages only after ClickHouse accepts them.
 
-### 7. Send test logs (Terminal 4)
+### 8. Send test logs (Terminal 4)
 
 Open a fourth terminal. Run the following from the repository root:
 
@@ -177,7 +190,7 @@ printf '%s\n' '{"level":"info","msg":"hello"}' >> ingestion/configs/test.log
 printf '%s\n' 'CEF:0|Security|threatmanager|1.0|100|worm stopped|10|src=10.0.0.1' >> ingestion/configs/test.log
 ```
 
-### 8. Verify in ClickHouse
+### 9. Verify in ClickHouse
 
 Open the ClickHouse client inside the running container:
 
@@ -243,12 +256,13 @@ curl -sS -u default:changeme \
 
 ### Parser
 
-| Variable             | Default            | Description       |
-| -------------------- | ------------------ | ----------------- |
-| `KAFKA_BROKERS`      | `localhost:9092`   | Kafka broker list |
-| `KAFKA_RAW_TOPIC`    | `raw-logs`         | Topic to consume  |
-| `KAFKA_PARSED_TOPIC` | `parsed-logs`      | Topic to produce  |
-| `KAFKA_GROUP_ID`     | `log-parser-group` | Consumer group    |
+| Variable               | Default            | Description                                  |
+| ---------------------- | ------------------ | -------------------------------------------- |
+| `KAFKA_BROKERS`        | `localhost:9092`   | Kafka broker list                            |
+| `KAFKA_RAW_TOPIC`      | `raw-logs`         | Topic to consume                             |
+| `KAFKA_PARSED_TOPIC`   | `parsed-logs`      | Topic for successfully parsed events         |
+| `KAFKA_UNKNOWN_TOPIC`  | `unknown-logs`     | Topic for events that match no known format  |
+| `KAFKA_GROUP_ID`       | `log-parser-group` | Consumer group                               |
 
 ### Sink
 
@@ -303,7 +317,7 @@ WHERE event_id IN (
 | Syslog  | RFC3164 regex    | priority, facility, severity, hostname, message                    |
 | CEF     | CEF header regex | version, vendor, product, signature_id, name, severity, extensions |
 | CSV     | `encoding/csv`   | col_0, col_1, ... columns array                                    |
-| Unknown | Fallback         | Empty fields, passthrough                                          |
+| Unknown | Fallback         | Routed to `unknown-logs` topic as unparsed `RawEvent`              |
 
 ## Scaling
 

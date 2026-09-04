@@ -28,8 +28,11 @@ func main() {
 		cancel()
 	}()
 
-	producer := kafka.NewProducer(cfg.Kafka, cfg.Kafka.ParsedTopic)
-	defer producer.Close()
+	parsedProducer := kafka.NewProducer(cfg.Kafka, cfg.Kafka.ParsedTopic)
+	defer parsedProducer.Close()
+
+	unknownProducer := kafka.NewProducer(cfg.Kafka, cfg.Kafka.UnknownTopic)
+	defer unknownProducer.Close()
 
 	consumer := kafka.NewConsumer(cfg.Kafka)
 	defer consumer.Close()
@@ -40,11 +43,18 @@ func main() {
 			return false, fmt.Errorf("unmarshal raw event: %w", err)
 		}
 
-		parsed := parser.DefaultChain(raw)
-		if err := producer.Publish(ctx, string(key), parsed); err != nil {
-			return false, fmt.Errorf("publish parsed event: %w", err)
+		parsed, ok := parser.DefaultChain(raw)
+		if ok {
+			if err := parsedProducer.Publish(ctx, string(key), parsed); err != nil {
+				return false, fmt.Errorf("publish parsed event: %w", err)
+			}
+			fmt.Printf("parsed [%s] -> %s\n", parsed.Format, parsed.Source)
+		} else {
+			if err := unknownProducer.Publish(ctx, string(key), raw); err != nil {
+				return false, fmt.Errorf("publish unknown event: %w", err)
+			}
+			fmt.Printf("unknown format -> %s\n", raw.Source)
 		}
-		fmt.Printf("parsed [%s] -> %s\n", parsed.Format, parsed.Source)
 		return true, nil
 	})
 

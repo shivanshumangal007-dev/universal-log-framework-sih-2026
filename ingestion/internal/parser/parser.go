@@ -15,26 +15,19 @@ import (
 // If it returns ok=false, the next parser should be tried.
 type Parser func(raw model.RawEvent) (model.ParsedEvent, bool)
 
-// Chain tries parsers in order; the last fallback is "unknown".
-func Chain(raw model.RawEvent, parsers ...Parser) model.ParsedEvent {
+// Chain tries parsers in order.
+// It returns (ParsedEvent, true) when a parser matches, (ParsedEvent{}, false) for unknown formats.
+func Chain(raw model.RawEvent, parsers ...Parser) (model.ParsedEvent, bool) {
 	for _, p := range parsers {
 		if ev, ok := p(raw); ok {
-			return ev
+			return ev, true
 		}
 	}
-	// Unknown format fallback.
-	return model.ParsedEvent{
-		Source:    raw.Source,
-		RawLine:   raw.RawLine,
-		Timestamp: raw.Timestamp,
-		Format:    "unknown",
-		Fields:    map[string]interface{}{},
-		Metadata:  raw.Metadata,
-	}
+	return model.ParsedEvent{}, false
 }
 
 // DefaultChain is the recommended parser order.
-func DefaultChain(raw model.RawEvent) model.ParsedEvent {
+func DefaultChain(raw model.RawEvent) (model.ParsedEvent, bool) {
 	return Chain(raw, ParseJSON, ParseSyslog, ParseCEF, ParseCSV)
 }
 

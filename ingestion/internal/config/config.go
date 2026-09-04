@@ -13,6 +13,7 @@ type Kafka struct {
 	Brokers      []string
 	RawTopic     string
 	ParsedTopic  string
+	UnknownTopic string
 	GroupID      string
 	WriteTimeout time.Duration
 	ReadTimeout  time.Duration
@@ -123,6 +124,7 @@ func LoadParser() Parser {
 			Brokers:      []string{envOr("KAFKA_BROKERS", "localhost:9092")},
 			RawTopic:     envOr("KAFKA_RAW_TOPIC", "raw-logs"),
 			ParsedTopic:  envOr("KAFKA_PARSED_TOPIC", "parsed-logs"),
+			UnknownTopic: envOr("KAFKA_UNKNOWN_TOPIC", "unknown-logs"),
 			GroupID:      envOr("KAFKA_GROUP_ID", "log-parser-group"),
 			ReadTimeout:  envDuration("KAFKA_READ_TIMEOUT", 10*time.Second),
 			WriteTimeout: envDuration("KAFKA_WRITE_TIMEOUT", 10*time.Second),
@@ -153,5 +155,5 @@ func LoadSink() Sink {
 }
 
 func (k Kafka) String() string {
-	return fmt.Sprintf("brokers=%v raw=%s parsed=%s group=%s", k.Brokers, k.RawTopic, k.ParsedTopic, k.GroupID)
+	return fmt.Sprintf("brokers=%v raw=%s parsed=%s unknown=%s group=%s", k.Brokers, k.RawTopic, k.ParsedTopic, k.UnknownTopic, k.GroupID)
 }

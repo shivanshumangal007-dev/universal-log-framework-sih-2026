@@ -72,13 +72,23 @@ func TestDefaultChain(t *testing.T) {
 		{"<34>Oct 11 22:14:15 h msg", "syslog"},
 		{"CEF:0|A|B|1|2|C|10|", "cef"},
 		{"a,b,c", "csv"},
-		{"random text", "unknown"},
 	}
 	for _, tc := range tests {
 		raw := model.RawEvent{RawLine: tc.line, Timestamp: time.Now()}
-		p := DefaultChain(raw)
+		p, ok := DefaultChain(raw)
+		if !ok {
+			t.Fatalf("line=%q expected ok=true", tc.line)
+		}
 		if p.Format != tc.format {
 			t.Fatalf("line=%q expected %s got %s", tc.line, tc.format, p.Format)
 		}
+	}
+}
+
+func TestDefaultChainUnknownFormat(t *testing.T) {
+	raw := model.RawEvent{RawLine: "totally unrecognizable garbage", Timestamp: time.Now()}
+	p, ok := DefaultChain(raw)
+	if ok {
+		t.Fatalf("expected ok=false for unknown format, got ok=true with format=%s", p.Format)
 	}
 }
