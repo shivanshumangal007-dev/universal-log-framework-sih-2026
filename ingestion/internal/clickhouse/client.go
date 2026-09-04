@@ -86,6 +86,25 @@ func (c *Client) CreateTable(ctx context.Context) error {
 	return c.conn.Exec(ctx, query)
 }
 
+// CreateReviewQueue creates the low-confidence review table if needed.
+func (c *Client) CreateReviewQueue(ctx context.Context) error {
+	query := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.review_queue (
+		event_id UUID,
+		source String,
+		raw_line String,
+		event_timestamp DateTime64(3, 'UTC'),
+		format LowCardinality(String),
+		fields_json String,
+		metadata_json String,
+		ingested_at DateTime64(3, 'UTC'),
+		confidence Float32,
+		status String DEFAULT 'pending'
+	) ENGINE = MergeTree
+	ORDER BY (event_timestamp, source)`, c.database)
+
+	return c.conn.Exec(ctx, query)
+}
+
 // EventID derives a deterministic UUID-like string from event contents.
 // This makes inserts idempotent for identical events.
 func EventID(ev model.ParsedEvent) string {
@@ -118,6 +137,24 @@ func (c *Client) Insert(ctx context.Context, ev model.ParsedEvent) error {
 		string(fieldsJSON),
 		string(metaJSON),
 		time.Now().UTC(),
+	)
+}
+
+// InsertReview stores a low-confidence inferred event for later review.
+func (c *Client) InsertReview(ctx context.Context, ev model.ParsedEvent, confidence float64) error {
+	fieldsJSON, err := json.Marshal(ev.Fields)
+	if err != nil {
+		return fmt.Errorf("marshal fields: %w", err)
+	}
+	metaJSON, err := json.Marshal(ev.Metadata)
+	if err != nil {
+		return fmt.Errorf("marshal metadata: %w", err)
+	}
+
+	query := fmt.Sprintf(`INSERT INTO %s.review_queue (event_id, source, raw_line, event_timestamp, format, fields_json, metadata_json, ingested_at, confidence, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, c.database)
+	return c.conn.Exec(ctx, query,
+		EventID(ev), ev.Source, ev.RawLine, ev.Timestamp, ev.Format,
+		string(fieldsJSON), string(metaJSON), time.Now().UTC(), float32(confidence), "pending",
 	)
 }
 

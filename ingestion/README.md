@@ -27,6 +27,7 @@ ingestion/
 │   ├── collector/          # Entrypoint: file-tail + syslog → raw-logs
 │   ├── parser/             # Entrypoint: raw-logs → parsed-logs
 │   └── sink/               # Entrypoint: parsed-logs → ClickHouse
+│   └── inferredsink/       # Entrypoint: inferred-logs → ClickHouse/review_queue
 ├── internal/
 │   ├── collector/
 │   │   ├── filetail/       # File tailing logic
@@ -175,9 +176,28 @@ KAFKA_BROKERS=localhost:9092 \
 
 The sink creates `logs.parsed_logs` automatically and commits Kafka messages only after ClickHouse accepts them.
 
-### 8. Send test logs (Terminal 4)
+### 8. Run the inferred sink (Terminal 4)
 
-Open a fourth terminal. Run the following from the repository root:
+Open a fourth terminal and run:
+
+```bash
+cd /path/to/universal-log-framework/ingestion
+KAFKA_BROKERS=localhost:9092 \
+  CLICKHOUSE_ADDR=localhost:9000 \
+  CLICKHOUSE_DATABASE=logs \
+  CLICKHOUSE_USERNAME=default \
+  CLICKHOUSE_PASSWORD=changeme \
+  ./bin/inferredsink
+```
+
+The inferred sink consumes `inferred-logs`. Events at or above the confidence
+threshold go to `logs.parsed_logs` with `format='inferred'`; lower-confidence
+events go to `logs.review_queue` with `status='pending'`. It creates the review
+table automatically and commits Kafka offsets only after a successful insert.
+
+### 9. Send test logs (Terminal 5)
+
+Open a fifth terminal. Run the following from the repository root:
 
 ```bash
 # Syslog UDP
@@ -190,7 +210,7 @@ printf '%s\n' '{"level":"info","msg":"hello"}' >> ingestion/configs/test.log
 printf '%s\n' 'CEF:0|Security|threatmanager|1.0|100|worm stopped|10|src=10.0.0.1' >> ingestion/configs/test.log
 ```
 
-### 9. Verify in ClickHouse
+### 10. Verify in ClickHouse
 
 Open the ClickHouse client inside the running container:
 
@@ -207,6 +227,8 @@ Then run:
 SHOW TABLES;
 
 SELECT count() FROM parsed_logs;
+
+SELECT count() FROM review_queue;
 
 SELECT event_timestamp, format, source, fields_json, metadata_json
 FROM parsed_logs
@@ -277,6 +299,18 @@ curl -sS -u default:changeme \
 | `CLICKHOUSE_PASSWORD`       | `changeme`        | Password             |
 | `CLICKHOUSE_BATCH_SIZE`     | `100`             | Batch insert size    |
 | `CLICKHOUSE_FLUSH_INTERVAL` | `2s`              | Batch flush interval |
+
+### Inferred sink
+
+| Variable                | Default           | Description                                  |
+| ----------------------- | ----------------- | -------------------------------------------- |
+| `KAFKA_BROKERS`         | `localhost:9092`  | Kafka broker list                            |
+| `KAFKA_INFERRED_TOPIC`  | `inferred-logs`   | Topic to consume                             |
+| `CONFIDENCE_THRESHOLD`  | `0.75`            | Minimum confidence stored as inferred output |
+| `CLICKHOUSE_ADDR`       | `localhost:9000`  | Native TCP address                           |
+| `CLICKHOUSE_DATABASE`   | `logs`            | Database name                                |
+| `CLICKHOUSE_USERNAME`   | `default`         | Username                                     |
+| `CLICKHOUSE_PASSWORD`   | `changeme`        | Password                                     |
 
 ## ClickHouse Schema
 

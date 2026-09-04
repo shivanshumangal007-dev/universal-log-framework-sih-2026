@@ -10,13 +10,21 @@ import (
 
 // Kafka holds producer/consumer settings.
 type Kafka struct {
-	Brokers      []string
-	RawTopic     string
-	ParsedTopic  string
-	UnknownTopic string
-	GroupID      string
-	WriteTimeout time.Duration
-	ReadTimeout  time.Duration
+	Brokers       []string
+	RawTopic      string
+	ParsedTopic   string
+	UnknownTopic  string
+	InferredTopic string
+	GroupID       string
+	WriteTimeout  time.Duration
+	ReadTimeout   time.Duration
+}
+
+// InferredSink is the configuration for inferred event storage.
+type InferredSink struct {
+	Kafka               Kafka
+	ClickHouse          ClickHouseConfig
+	ConfidenceThreshold float64
 }
 
 // FileTail holds file collector settings.
@@ -73,6 +81,18 @@ func envInt(key string, def int) int {
 		return def
 	}
 	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
+func envFloat(key string, def float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.ParseFloat(v, 64)
 	if err != nil {
 		return def
 	}
@@ -151,6 +171,28 @@ func LoadSink() Sink {
 			BatchSize:     envInt("CLICKHOUSE_BATCH_SIZE", 100),
 			FlushInterval: envDuration("CLICKHOUSE_FLUSH_INTERVAL", 2*time.Second),
 		},
+	}
+}
+
+// LoadInferredSink returns inferred sink settings populated from env vars.
+func LoadInferredSink() InferredSink {
+	return InferredSink{
+		Kafka: Kafka{
+			Brokers:       []string{envOr("KAFKA_BROKERS", "localhost:9092")},
+			InferredTopic: envOr("KAFKA_INFERRED_TOPIC", "inferred-logs"),
+			GroupID:       "inferred-sink",
+			ReadTimeout:   envDuration("KAFKA_READ_TIMEOUT", 10*time.Second),
+			WriteTimeout:  envDuration("KAFKA_WRITE_TIMEOUT", 10*time.Second),
+		},
+		ClickHouse: ClickHouseConfig{
+			Addr:          envOr("CLICKHOUSE_ADDR", "localhost:9000"),
+			Database:      envOr("CLICKHOUSE_DATABASE", "logs"),
+			Username:      envOr("CLICKHOUSE_USERNAME", "default"),
+			Password:      envOr("CLICKHOUSE_PASSWORD", "changeme"),
+			BatchSize:     envInt("CLICKHOUSE_BATCH_SIZE", 100),
+			FlushInterval: envDuration("CLICKHOUSE_FLUSH_INTERVAL", 2*time.Second),
+		},
+		ConfidenceThreshold: envFloat("CONFIDENCE_THRESHOLD", 0.75),
 	}
 }
 
