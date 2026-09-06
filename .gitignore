@@ -16,6 +16,11 @@ inference/__pycache__/
 *$py.class
 *.egg-info/
 .pytest_cache/
+.venv/
+.env
+uv.lock
+pyproject.toml
+.python-version
 
 # ── Node / React (dashboard/) ───────────────
 dashboard/node_modules/
@@ -24,6 +29,7 @@ dashboard/.vite/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+package-lock.json
 
 # ── Infra / Docker data (never commit runtime data) ──
 infra/ch_data/
