@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from auth import get_current_admin
 from config import (
@@ -87,8 +88,92 @@ def review_queue(
     return _ch_query(query)
 
 
+def _ensure_schema_table() -> None:
+    """Create the learned-schema table if it doesn't exist yet.
+
+    Cheap to call on every correction (CREATE TABLE IF NOT EXISTS) —
+    avoids needing separate startup-ordering logic for this table.
+    ReplacingMergeTree keyed by source + updated_at: querying with
+    FINAL (or ORDER BY updated_at DESC LIMIT 1) always gets the most
+    recent human-confirmed schema for that source.
+    """
+    _ch_query(
+        "CREATE TABLE IF NOT EXISTS source_schemas ("
+        "source String, "
+        "delimiter_used String, "
+        "field_mapping_json String, "
+        "updated_at DateTime"
+        ") ENGINE = ReplacingMergeTree(updated_at) ORDER BY source"
+    )
+
+
+def _learn_schema(source: str, delimiter_used: str, field_names_ordered: list[str]) -> None:
+    """Remember a human-corrected field mapping for this source.
+
+    field_names_ordered is positional — index 0 is whatever field name
+    the admin gave the first delimiter-split token, etc. — so future
+    raw lines from the same source can be split the same way and get
+    the same names applied, without re-running the generic guesser.
+    """
+    _ensure_schema_table()
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    row = json.dumps(
+        {
+            "source": source,
+            "delimiter_used": delimiter_used,
+            "field_mapping_json": json.dumps(field_names_ordered, ensure_ascii=False),
+            "updated_at": now,
+        },
+        ensure_ascii=False,
+    )
+
+    if not CLICKHOUSE_URL:
+        return  # fail open — learning is a bonus, never block the approve flow
+
+    url = CLICKHOUSE_URL.rstrip("/") + "/"
+    query_params: dict[str, str] = {
+        "query": "INSERT INTO source_schemas FORMAT JSONEachRow",
+        "database": CLICKHOUSE_DATABASE,
+        "default_format": "JSONEachRow",
+    }
+    if CLICKHOUSE_USER:
+        query_params["user"] = CLICKHOUSE_USER
+    if CLICKHOUSE_PASSWORD:
+        query_params["password"] = CLICKHOUSE_PASSWORD
+    query_string = "&".join(
+        f"{k}={urllib.parse.quote(str(v), safe='')}" for k, v in query_params.items()
+    )
+    full_url = f"{url}?{query_string}"
+    req = urllib.request.Request(
+        full_url,
+        data=row.encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10):
+            pass
+    except (urllib.error.HTTPError, urllib.error.URLError):
+        pass  # fail open — a failed learn-write should never break approve itself
+
+
+class CorrectionPayload(BaseModel):
+    fields_json: dict[str, Any]
+
+
 @router.post("/review-queue/{event_id}/approve")
-def review_approve(event_id: str) -> dict[str, str]:
+def review_approve(event_id: str, payload: CorrectionPayload | None = None) -> dict[str, str]:
+    """Approve a review-queue entry, optionally with corrected field values.
+
+    - Admin just clicks Approve, no edits: payload is None, we reuse the
+      engine's original fields_json as-is, tagged inferred_approved.
+    - Admin edited the proposed fields before approving: payload carries
+      the corrected values instead, tagged inferred_corrected so there's
+      an honest record a human fixed it rather than trusting the engine's
+      raw guess.
+    Either way, exactly one row lands in parsed_logs and review_queue's
+    status reflects which path was taken.
+    """
     safe_id = _escape(event_id)
     rows = _ch_query(
         f"SELECT * FROM review_queue WHERE event_id = '{safe_id}' LIMIT 1",
@@ -99,14 +184,34 @@ def review_approve(event_id: str) -> dict[str, str]:
     row = rows[0]
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
+    if payload is not None and payload.fields_json:
+        fields_json_value = json.dumps(payload.fields_json, ensure_ascii=False)
+        format_tag = "inferred_corrected"
+        new_status = "corrected"
+
+        # Learn from this correction: remember the field names the admin
+        # gave, in order, keyed by source — so the NEXT line from this
+        # same source can skip the generic guess and use this directly.
+        try:
+            original_metadata = json.loads(row.get("metadata_json") or "{}")
+            delimiter_used = original_metadata.get("delimiter_used", " ")
+            field_names_ordered = list(payload.fields_json.keys())
+            _learn_schema(row["source"], delimiter_used, field_names_ordered)
+        except Exception:
+            pass  # learning is a bonus on top of approve — never let it block the approve itself
+    else:
+        fields_json_value = row["fields_json"]
+        format_tag = "inferred_approved"
+        new_status = "approved"
+
     json_row = json.dumps(
         {
             "event_id": row["event_id"],
             "source": row["source"],
             "raw_line": row["raw_line"],
             "event_timestamp": row["event_timestamp"],
-            "format": "inferred_approved",
-            "fields_json": row["fields_json"],
+            "format": format_tag,
+            "fields_json": fields_json_value,
             "metadata_json": row["metadata_json"],
             "ingested_at": now,
         },
@@ -119,7 +224,11 @@ def review_approve(event_id: str) -> dict[str, str]:
         raise HTTPException(status_code=503, detail="ClickHouse not configured")
 
     url = CLICKHOUSE_URL.rstrip("/") + "/"
-    query_params: dict[str, str] = {"query": insert_query, "default_format": "JSONEachRow"}
+    query_params: dict[str, str] = {
+        "query": insert_query,
+        "database": CLICKHOUSE_DATABASE,
+        "default_format": "JSONEachRow",
+    }
     if CLICKHOUSE_USER:
         query_params["user"] = CLICKHOUSE_USER
     if CLICKHOUSE_PASSWORD:
@@ -151,10 +260,10 @@ def review_approve(event_id: str) -> dict[str, str]:
         )
 
     update_query = (
-        f"ALTER TABLE review_queue UPDATE status = 'approved' WHERE event_id = '{safe_id}'"
+        f"ALTER TABLE review_queue UPDATE status = '{new_status}' WHERE event_id = '{safe_id}'"
     )
     _ch_query(update_query)
-    return {"status": "approved"}
+    return {"status": new_status}
 
 
 @router.post("/review-queue/{event_id}/reject")
