@@ -123,6 +123,13 @@ def run_kafka_worker(
                     bootstrap_servers=brokers,
                     group_id=KAFKA_GROUP_ID,
                     enable_auto_commit=True,
+                    # Explicit on purpose: kafka-python's default here is
+                    # "latest", which means a new (or previously-caught-up)
+                    # consumer group silently misses any backlog that was
+                    # already sitting on the topic before it connected —
+                    # e.g. after a container restart mid-demo. "earliest"
+                    # makes sure nothing already in unknown-logs gets lost.
+                    auto_offset_reset="earliest",
                     request_timeout_ms=KAFKA_BOOTSTRAP_TIMEOUT_MS,
                 )
             if active_producer is None:

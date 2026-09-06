@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -11,8 +13,22 @@ from auth import verify_password, create_access_token, get_current_admin
 from config import ADMIN_USERNAME, ADMIN_PASSWORD_HASH, DASHBOARD_ORIGIN
 from gateway import router as gateway_router
 
+# Without this, kafka_worker's logger.warning(...) calls on connection
+# failure/retry may never actually reach stdout depending on how
+# uvicorn's own logging setup interacts with the root logger — meaning
+# a genuinely broken Kafka connection could look identical to "quietly
+# working" in `docker compose logs`. Configure it explicitly so retry
+# warnings are always visible.
+logging.basicConfig(level=logging.INFO)
+
 app = FastAPI()
 
+# NOTE: '*' was previously included alongside DASHBOARD_ORIGIN here.
+# allow_credentials=True combined with a wildcard origin defeats the
+# entire purpose of restricting to DASHBOARD_ORIGIN — it allows any
+# origin to make credentialed requests (i.e. anyone's browser can call
+# this API using a logged-in admin's session/cookies/token). Removed;
+# only the configured dashboard origin is allowed.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[DASHBOARD_ORIGIN],
