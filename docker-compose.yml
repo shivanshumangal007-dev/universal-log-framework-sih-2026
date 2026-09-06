@@ -170,6 +170,7 @@ services:
    - CLICKHOUSE_URL=http://ch-server:8123
    - CLICKHOUSE_USER=default
    - CLICKHOUSE_DATABASE=logs
+   - DASHBOARD_ORIGIN=http://localhost:3000
   depends_on:
    kafka:
     condition: service_healthy
