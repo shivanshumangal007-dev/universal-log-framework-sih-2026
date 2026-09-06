@@ -11,7 +11,7 @@ services:
    CLICKHOUSE_USER: default
    CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in .env}
   volumes:
-   - ./infra/ch_data:/var/lib/clickhouse/
+   - clickhouse_data:/var/lib/clickhouse/
    - ./infra/ch_logs:/var/log/clickhouse-server/
   ulimits:
    nofile:
@@ -195,3 +195,6 @@ services:
 networks:
  log-network:
   driver: bridge
+
+volumes:
+  clickhouse_data:
