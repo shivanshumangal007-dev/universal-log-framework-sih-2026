@@ -189,14 +189,113 @@ def review_approve(event_id: str, payload: CorrectionPayload | None = None) -> d
         format_tag = "inferred_corrected"
         new_status = "corrected"
 
-        # Learn from this correction: remember the field names the admin
-        # gave, in order, keyed by source — so the NEXT line from this
-        # same source can skip the generic guess and use this directly.
+        # Learn from this correction: match the corrected field names
+        # to their actual TOKEN POSITIONS in the raw_line, not just
+        # the JSON dict order (which can be arbitrary).
+        #
+        # Algorithm:
+        # 1. Detect the correct delimiter by trying each candidate
+        # 2. Split raw_line into tokens by that delimiter
+        # 3. For each token, find which corrected field it belongs to
+        #    by matching values (handles key=value extraction too)
+        # 4. Save the position-ordered field names
         try:
-            original_metadata = json.loads(row.get("metadata_json") or "{}")
-            delimiter_used = original_metadata.get("delimiter_used", " ")
-            field_names_ordered = list(payload.fields_json.keys())
-            _learn_schema(row["source"], delimiter_used, field_names_ordered)
+            raw_line = row.get("raw_line", "")
+            corrected = payload.fields_json  # {field_name: value}
+
+            # --- Step 1: Detect delimiter ---
+            candidate_delimiters = ["|", ",", "\t", " "]
+            best_delim = " "
+            best_match_count = -1
+
+            for delim in candidate_delimiters:
+                if delim == " ":
+                    tokens = raw_line.split()
+                else:
+                    tokens = [t.strip() for t in raw_line.split(delim)]
+                tokens = [t for t in tokens if t]
+
+                # Count matches: a token matches if it equals a corrected
+                # value OR it's key=value where the value part matches
+                match_count = 0
+                for token in tokens:
+                    for field_name, field_value in corrected.items():
+                        val_str = str(field_value).strip()
+                        if token == val_str:
+                            match_count += 1
+                            break
+                        if "=" in token:
+                            k, v = token.split("=", 1)
+                            if v.strip() == val_str:
+                                match_count += 1
+                                break
+                            if token == val_str:
+                                match_count += 1
+                                break
+
+                if match_count > best_match_count:
+                    best_match_count = match_count
+                    best_delim = delim
+
+            # --- Step 2: Split by best delimiter ---
+            if best_delim == " ":
+                tokens = raw_line.split()
+            else:
+                tokens = [t.strip() for t in raw_line.split(best_delim)]
+            tokens = [t for t in tokens if t]
+
+            # --- Step 3: Match each token to its corrected field ---
+            # Build a position-to-field mapping
+            used_fields: set[str] = set()
+            position_fields: list[str] = []
+
+            for i, token in enumerate(tokens):
+                matched_field = None
+
+                # Try exact value match first
+                for field_name, field_value in corrected.items():
+                    if field_name in used_fields:
+                        continue
+                    val_str = str(field_value).strip()
+                    if token == val_str:
+                        matched_field = field_name
+                        break
+
+                # Try key=value match: token "user=23" → field "user" with value "23"
+                if matched_field is None and "=" in token:
+                    k, v = token.split("=", 1)
+                    k = k.strip()
+                    v = v.strip()
+                    for field_name, field_value in corrected.items():
+                        if field_name in used_fields:
+                            continue
+                        val_str = str(field_value).strip()
+                        if k == field_name and v == val_str:
+                            matched_field = field_name
+                            break
+                    # Also try: field value matches the whole token
+                    if matched_field is None:
+                        for field_name, field_value in corrected.items():
+                            if field_name in used_fields:
+                                continue
+                            if str(field_value).strip() == token:
+                                matched_field = field_name
+                                break
+
+                if matched_field:
+                    position_fields.append(matched_field)
+                    used_fields.add(matched_field)
+                else:
+                    # Fallback: assign next unused corrected field name
+                    remaining = [f for f in corrected if f not in used_fields]
+                    if remaining:
+                        fallback = remaining[0]
+                        position_fields.append(fallback)
+                        used_fields.add(fallback)
+                    else:
+                        position_fields.append(f"field_{i}")
+
+            _learn_schema(row["source"], best_delim, position_fields)
         except Exception:
             pass  # learning is a bonus on top of approve — never let it block the approve itself
     else:

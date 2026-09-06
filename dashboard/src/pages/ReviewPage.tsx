@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api";
 import type { CorrectedFields, ReviewItem } from "../lib/api";
+import FormatOutput from "../components/FormatOutput";
 
 const PAGE_SIZE = 20;
 
@@ -280,7 +281,7 @@ export default function ReviewPage() {
 													</div>
 												</td>
 												<td className='px-4 py-3 text-neutral-600 whitespace-nowrap'>
-													{new Date(item.event_timestamp).toLocaleString()}
+													{new Date(item.event_timestamp.replace(" ", "T") + (item.event_timestamp.endsWith("Z") ? "" : "Z")).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
 												</td>
 												<td className='px-4 py-3 text-neutral-600 truncate max-w-[250px]'>
 													{item.raw_line}
@@ -361,21 +362,16 @@ export default function ReviewPage() {
 																</div>
 															</div>
 															<div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
-																<div>
-																	<p className='font-semibold text-neutral-700 mb-1'>
-																		Inferred Fields JSON
-																	</p>
-																	<pre className='font-mono bg-white border border-neutral-200 rounded p-2 text-neutral-600 overflow-auto max-h-48'>
-																		{JSON.stringify(
-																			fieldsToPayload(
-																				editedFields[item.event_id] ||
-																					parseFields(item.fields_json),
-																			),
-																			null,
-																			2,
-																		)}
-																	</pre>
-																</div>
+																<FormatOutput
+																	fieldsJson={JSON.stringify(
+																		fieldsToPayload(
+																			editedFields[item.event_id] ||
+																				parseFields(item.fields_json),
+																		),
+																	)}
+																	source={item.source}
+																	label="Inferred Fields Output"
+																/>
 																<div>
 																	<p className='font-semibold text-neutral-700 mb-1'>
 																		Metadata JSON
@@ -397,7 +393,7 @@ export default function ReviewPage() {
 																	</span>
 																</span>
 																<span>
-																	Ingested: {new Date(item.ingested_at).toLocaleString()}
+																	Ingested: {new Date(item.ingested_at.replace(" ", "T") + (item.ingested_at.endsWith("Z") ? "" : "Z")).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
 																</span>
 																<span>
 																	Format:{" "}

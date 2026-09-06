@@ -192,6 +192,21 @@ services:
   networks:
    - log-network
 
+ kafka-init:
+  image: apache/kafka:3.9.0
+  depends_on:
+   kafka:
+    condition: service_healthy
+  networks:
+   - log-network
+  command: >
+   bash -c "
+     /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --topic raw-logs --bootstrap-server kafka:9092 &&
+     /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --topic parsed-logs --bootstrap-server kafka:9092 &&
+     /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --topic unknown-logs --bootstrap-server kafka:9092 &&
+     /opt/kafka/bin/kafka-topics.sh --create --if-not-exists --topic inferred-logs --bootstrap-server kafka:9092
+   "
+
 networks:
  log-network:
   driver: bridge

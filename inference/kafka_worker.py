@@ -128,11 +128,22 @@ def process_event(
             # A human already taught us this source's format — apply it
             # directly instead of running the generic guesser again.
             field_names, delimiter_used = learned
-            tokens = raw_line.split(delimiter_used)
-            proposed_fields = {
-                (field_names[i] if i < len(field_names) else f"field_{i}"): token
-                for i, token in enumerate(tokens)
-            }
+            if delimiter_used == " ":
+                tokens = raw_line.split()
+            else:
+                tokens = [t.strip() for t in raw_line.split(delimiter_used)]
+            # Filter out empty tokens (from leading/trailing delimiters)
+            tokens = [t for t in tokens if t]
+            proposed_fields = {}
+            for i, token in enumerate(tokens):
+                field_name = field_names[i] if i < len(field_names) else f"field_{i}"
+                # Handle key=value tokens: if the token is "user=23"
+                # and the learned field name is "user", extract just "23"
+                if "=" in token:
+                    k, v = token.split("=", 1)
+                    if k.strip() == field_name:
+                        token = v.strip()
+                proposed_fields[field_name] = token
             inference = {
                 "proposed_fields": proposed_fields,
                 "confidence": 1.0,

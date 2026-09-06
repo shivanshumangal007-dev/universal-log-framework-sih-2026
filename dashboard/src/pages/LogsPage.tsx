@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api";
 import type { ParsedLog } from "../lib/api";
+import FormatOutput from "../components/FormatOutput";
 
 const PAGE_SIZE = 25;
 
@@ -157,7 +158,7 @@ export default function LogsPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-neutral-600 whitespace-nowrap">
-                          {new Date(log.event_timestamp).toLocaleString()}
+                          {new Date(log.event_timestamp.replace(" ", "T") + (log.event_timestamp.endsWith("Z") ? "" : "Z")).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
                         </td>
                         <td className="px-4 py-3 text-neutral-600 truncate max-w-[300px]">
                           {log.raw_line}
@@ -174,16 +175,11 @@ export default function LogsPage() {
                                 </p>
                               </div>
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <div>
-                                  <p className="font-semibold text-neutral-700 mb-1">Fields JSON</p>
-                                  <pre className="font-mono bg-white border border-neutral-200 rounded p-2 text-neutral-600 overflow-auto max-h-48">
-                                    {JSON.stringify(
-                                      JSON.parse(log.fields_json || "{}"),
-                                      null,
-                                      2
-                                    )}
-                                  </pre>
-                                </div>
+                                <FormatOutput
+                                  fieldsJson={log.fields_json}
+                                  source={log.source}
+                                  label="Fields Output"
+                                />
                                 <div>
                                   <p className="font-semibold text-neutral-700 mb-1">Metadata JSON</p>
                                   <pre className="font-mono bg-white border border-neutral-200 rounded p-2 text-neutral-600 overflow-auto max-h-48">
@@ -197,7 +193,7 @@ export default function LogsPage() {
                               </div>
                               <div className="flex gap-4 text-neutral-500">
                                 <span>Event ID: <span className="font-mono text-neutral-700">{log.event_id}</span></span>
-                                <span>Ingested: {new Date(log.ingested_at).toLocaleString()}</span>
+                                <span>Ingested: {new Date(log.ingested_at.replace(" ", "T") + (log.ingested_at.endsWith("Z") ? "" : "Z")).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}</span>
                               </div>
                             </div>
                           </td>

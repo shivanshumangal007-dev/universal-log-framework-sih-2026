@@ -8,59 +8,128 @@ ISO_TIMESTAMP_RE = re.compile(
 IP_RE = re.compile(
     r"^(?:(?:25[0-5]|2[0-4]\d|[01]?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d?\d)$"
 )
-LEVELS = {"INFO", "WARN", "ERROR", "DEBUG", "CRITICAL"}
+LEVELS = {"INFO", "WARN", "ERROR", "DEBUG", "CRITICAL",
+          "info", "warn", "error", "debug", "critical",
+          "warning", "WARNING", "FATAL", "fatal", "TRACE", "trace"}
 
-# A window of 1 line always scores perfect delimiter-consistency and
-# perfect type-match trivially (there's nothing to disagree with yet),
-# which used to produce confidence == 1.0 on a single garbage line.
 # Require this many samples before confidence is allowed to reach its
 # full computed value; below it, confidence is scaled down linearly.
 MIN_SAMPLE_SIZE = 3
 
 
 def _token_type(token: str) -> str:
+    """Classify a single token into a semantic type."""
+    token = token.strip()
+    if not token:
+        return "empty"
     if ISO_TIMESTAMP_RE.match(token):
         return "timestamp"
     if IP_RE.match(token):
         return "ip_address"
-    if token in LEVELS:
+    if token.upper() in {l.upper() for l in LEVELS}:
         return "level"
-    if "=" in token:
+    if "=" in token and len(token.split("=", 1)) == 2 and token.split("=", 1)[0].strip():
         return "key_value"
+    # Check for pure numeric (could be a PID, port, user ID, etc.)
+    try:
+        float(token)
+        return "numeric"
+    except ValueError:
+        pass
     return "generic"
 
 
 def _field_name(token: str, position: int) -> str:
+    """Derive a field name for a token based on its type."""
+    token = token.strip()
+    if not token:
+        return f"field_{position}"
     if ISO_TIMESTAMP_RE.match(token):
         return "timestamp"
     if IP_RE.match(token):
         return "ip_address"
-    if token in LEVELS:
+    if token.upper() in {l.upper() for l in LEVELS}:
         return "level"
     if "=" in token:
         key, _ = token.split("=", 1)
-        return key
+        key = key.strip()
+        if key:
+            return key
     return f"field_{position}"
 
 
-def _compute_delimiter_consistency(lines: list[str], delimiter: str) -> float:
-    if not lines:
-        return 0.0
-    token_counts = [len(line.split(delimiter)) for line in lines]
-    most_common_count = Counter(token_counts).most_common(1)[0][1]
-    return most_common_count / len(lines)
+def _split_and_strip(line: str, delimiter: str) -> list[str]:
+    """Split a line by delimiter and strip whitespace from each token.
+
+    For space delimiter, we use split() which naturally handles
+    multiple consecutive spaces and strips. For other delimiters,
+    we split then strip each token individually.
+    """
+    if delimiter == " ":
+        return line.split()
+    return [token.strip() for token in line.split(delimiter)]
 
 
-def _compute_delimiter_stats(lines: list[str], delimiter: str) -> tuple[float, float]:
+def _score_delimiter(lines: list[str], delimiter: str) -> tuple[float, float, list[list[str]]]:
+    """Score a delimiter candidate. Returns (score, consistency, tokenized_lines).
+
+    The score is a composite of:
+    - consistency: fraction of lines that produce the same token count
+    - recognized_ratio: fraction of tokens that are recognized types
+    - penalizes delimiters that produce only 1 token (delimiter not present)
+    """
     if not lines:
-        return 0.0, 0.0
-    token_counts = [len(line.split(delimiter)) for line in lines]
-    most_common_count = Counter(token_counts).most_common(1)[0][1]
-    consistency = most_common_count / len(lines)
-    avg_tokens = sum(token_counts) / len(token_counts)
-    return consistency, avg_tokens
+        return 0.0, 0.0, []
+
+    tokenized = [_split_and_strip(line, delimiter) for line in lines]
+    token_counts = [len(tokens) for tokens in tokenized]
+
+    # If delimiter produces only 1 token for all lines, it's not present
+    if all(count <= 1 for count in token_counts):
+        return 0.0, 0.0, tokenized
+
+    # Consistency: what fraction of lines have the most common token count?
+    count_counter = Counter(token_counts)
+    most_common_count, most_common_freq = count_counter.most_common(1)[0]
+    consistency = most_common_freq / len(lines)
+
+    # Filter to lines with the dominant token count for recognized-ratio calc
+    dominant_lines = [
+        tokens for tokens, count in zip(tokenized, token_counts)
+        if count == most_common_count
+    ]
+
+    # Recognized ratio: across all tokens in dominant lines, what fraction
+    # are a recognized type (not "generic" and not "empty")?
+    total_tokens = 0
+    recognized_tokens = 0
+    for tokens in dominant_lines:
+        for token in tokens:
+            if not token:
+                continue
+            total_tokens += 1
+            ttype = _token_type(token)
+            if ttype not in ("generic", "empty"):
+                recognized_tokens += 1
+
+    recognized_ratio = recognized_tokens / total_tokens if total_tokens > 0 else 0.0
+
+    # Composite score: consistency matters most, but recognized_ratio
+    # breaks ties between delimiters with equal consistency.
+    # A small bonus for having more than 1 recognized token total.
+    score = consistency * (0.4 + recognized_ratio * 0.6)
+
+    return score, consistency, tokenized
+
 
 def infer_fields(lines: list[str]) -> dict:
+    """Infer field names, types, and confidence from a window of raw log lines.
+
+    Returns a dict with:
+    - proposed_fields: {field_name: value} for the last line
+    - confidence: 0.0 to 1.0
+    - delimiter_used: the chosen delimiter string
+    """
     if not lines:
         return {
             "proposed_fields": {},
@@ -68,35 +137,42 @@ def infer_fields(lines: list[str]) -> dict:
             "delimiter_used": " ",
         }
 
-    delimiters = [" ", ",", "|", "\t", "="]
+    # Filter out empty/whitespace-only lines
+    lines = [line for line in lines if line.strip()]
+    if not lines:
+        return {
+            "proposed_fields": {},
+            "confidence": 0.0,
+            "delimiter_used": " ",
+        }
+
+    delimiters = ["|", ",", "\t", " "]
     best_delimiter = " "
+    best_score = -1.0
     best_consistency = 0.0
+    best_tokenized: list[list[str]] = []
 
     for delim in delimiters:
-        consistency,avg_tokens = _compute_delimiter_stats(lines, delim)
-        if avg_tokens <= 1.0:
-            continue  # delimiter isn't actually present in these lines
-        if consistency > best_consistency and consistency >= 0.6:
-            best_consistency = consistency
+        score, consistency, tokenized = _score_delimiter(lines, delim)
+        if score > best_score:
+            best_score = score
             best_delimiter = delim
+            best_consistency = consistency
+            best_tokenized = tokenized
 
-    if best_delimiter is None:
+    # If nothing scored well, fall back to space
+    if best_score <= 0.0:
         best_delimiter = " "
-        best_consistency = _compute_delimiter_consistency(lines, best_delimiter)
-    if best_consistency < 0.6:
-        best_delimiter = " "
-        best_consistency = _compute_delimiter_consistency(lines, best_delimiter)
+        best_tokenized = [_split_and_strip(line, " ") for line in lines]
+        best_consistency = 1.0
 
-    # Tokenize all lines with the chosen delimiter
-    tokenized_lines = [line.split(best_delimiter) for line in lines]
-
-    # Determine dominant type per position
-    max_tokens = max(len(tokens) for tokens in tokenized_lines)
-    dominant_types = []
+    # Determine dominant type per position across all tokenized lines
+    max_tokens = max(len(tokens) for tokens in best_tokenized) if best_tokenized else 0
+    dominant_types: list[str] = []
     for pos in range(max_tokens):
         types = []
-        for tokens in tokenized_lines:
-            if pos < len(tokens):
+        for tokens in best_tokenized:
+            if pos < len(tokens) and tokens[pos]:
                 types.append(_token_type(tokens[pos]))
         if types:
             dominant = Counter(types).most_common(1)[0][0]
@@ -104,49 +180,44 @@ def infer_fields(lines: list[str]) -> dict:
         else:
             dominant_types.append("generic")
 
-        # Build proposed fields for the LAST line
-    last_line_tokens = tokenized_lines[-1]
-    proposed_fields = {}
+    # Build proposed fields for the LAST line
+    last_line_tokens = best_tokenized[-1] if best_tokenized else []
+    proposed_fields: dict[str, str] = {}
     match_count = 0
+
+    # Handle key=value specially: if any token is key=value, extract both
+    # the key name and value. Also handle "= " delimited formats where
+    # the entire line is key=value pairs separated by the delimiter.
     for pos, token in enumerate(last_line_tokens):
+        if not token:
+            continue
         field = _field_name(token, pos)
-        if "=" in token:
-            value = token.split("=", 1)[1]
+        if "=" in token and _token_type(token) == "key_value":
+            value = token.split("=", 1)[1].strip()
         else:
             value = token
         proposed_fields[field] = value
         if pos < len(dominant_types) and _token_type(token) == dominant_types[pos]:
             match_count += 1
 
-
-    total_tokens = len(last_line_tokens)
+    total_tokens = len([t for t in last_line_tokens if t])
     type_match_fraction = match_count / total_tokens if total_tokens > 0 else 0.0
 
-    # "generic" means a position didn't match any recognized type at
-    # all (not a timestamp, ip, level, or key=value). If EVERY column
-    # is generic, the lines might still be perfectly consistent with
-    # each other in shape (e.g. same word count every time) without
-    # containing anything actually recognizable — that used to still
-    # score a perfect match fraction, since "all generic, matching
-    # every time" looked identical to "all timestamps, matching every
-    # time" under this math. Zero it out in that case specifically;
-    # a line with at least one recognized column is left untouched.
-    recognized_positions = sum(1 for t in dominant_types if t != "generic")
+    # If EVERY column is generic, confidence should be very low —
+    # the delimiter might be consistent but we don't understand the data.
+    recognized_positions = sum(1 for t in dominant_types if t not in ("generic", "empty"))
 
     if recognized_positions == 0:
         confidence = 0.0
     else:
         confidence = round(best_consistency * type_match_fraction, 2)
 
-    # Discount confidence when we haven't seen enough lines from this
-    # source yet — a window of 1 trivially scores perfect consistency
-    # and perfect type-match against itself, which isn't a meaningful
-    # signal. Scale linearly up to MIN_SAMPLE_SIZE, full confidence
-    # only once we've actually seen enough lines to judge consistency.
+    # Discount confidence when we haven't seen enough lines yet.
     sample_size_factor = min(len(lines) / MIN_SAMPLE_SIZE, 1.0)
     confidence = round(confidence * sample_size_factor, 2)
 
     confidence = max(0.0, min(1.0, confidence))
+
     return {
         "proposed_fields": proposed_fields,
         "confidence": confidence,
