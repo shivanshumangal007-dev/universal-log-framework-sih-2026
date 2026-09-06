@@ -10,7 +10,7 @@ collector -> Kafka raw-logs -> parser -> parsed-logs -> Go sink -> ClickHouse
                                        -> unknown-logs -> inference worker -> inferred-logs -> inferred sink -> ClickHouse
 
 Python gateway API: http://localhost:8000
-Dashboard:          http://localhost:5173
+Dashboard:          http://localhost:3000
 Kafka:              localhost:9092
 ClickHouse HTTP:    http://localhost:8123
 ClickHouse native:  localhost:9000
@@ -25,159 +25,43 @@ Install or start:
 - Python 3.11+
 - Node.js and npm
 
-All commands below assume the repository root is the current directory:
-
-```bash
-cd /Users/shivanshumangal/Coding/Projects/universal-log-framework
-```
 
 ## Quick Start
 
-Use one terminal for Docker and one terminal for each long-running service.
+The root Compose file starts the complete pipeline, including the inferred sink that writes low-confidence events to `review_queue`.
 
-### 1. Start Kafka and ClickHouse
-
-```bash
-docker compose -f infra/docker-compose.yml up -d kafka clickhouse
-docker compose -f infra/docker-compose.yml ps
-```
-
-Check ClickHouse:
+Create a root `.env` file with the values required by Compose and the inference API, then run:
 
 ```bash
-curl -sS -u default:changeme http://localhost:8123/ping
+docker compose up -d --build
+docker compose ps
 ```
 
-Expected response:
+The services are available at:
 
-```text
-Ok.
-```
+- Dashboard: <http://localhost:3000>
+- Inference API: <http://localhost:8000>
+- ClickHouse HTTP: <http://localhost:8123>
+- Kafka: `localhost:9092`
 
-### 2. Create Kafka topics
+Check service health:
 
 ```bash
-docker exec kafka /opt/kafka/bin/kafka-topics.sh --create --if-not-exists \
-  --topic unknown-logs --bootstrap-server localhost:9092
-
-docker exec kafka /opt/kafka/bin/kafka-topics.sh --create --if-not-exists \
-  --topic inferred-logs --bootstrap-server localhost:9092
+curl -sS http://localhost:8000/health
+curl -sS http://localhost:8123/ping
 ```
 
-The collector and parser create their normal topics when Kafka auto-creation is enabled. To create all topics explicitly:
+Kafka topics are created automatically by the running services when Kafka auto-creation is enabled. To create them explicitly:
 
 ```bash
 for topic in raw-logs parsed-logs unknown-logs inferred-logs; do
   docker exec kafka /opt/kafka/bin/kafka-topics.sh --create --if-not-exists \
     --topic "$topic" --bootstrap-server localhost:9092
 done
+
 ```
 
-### 3. Build the Go services
-
-Terminal 1:
-
-```bash
-cd ingestion
-make build
-```
-
-This builds `collector`, `parser`, `sink`, and `inferredsink` in `ingestion/bin/`.
-
-### 4. Run the collector
-
-Terminal 2:
-
-```bash
-cd /Users/shivanshumangal/Coding/Projects/universal-log-framework/ingestion
-KAFKA_BROKERS=localhost:9092 ./bin/collector
-```
-
-It tails `ingestion/configs/test.log` and listens for syslog on UDP port `514`.
-
-### 5. Run the parser
-
-Terminal 3:
-
-```bash
-cd /Users/shivanshumangal/Coding/Projects/universal-log-framework/ingestion
-KAFKA_BROKERS=localhost:9092 ./bin/parser
-```
-
-### 6. Run the parsed-log sink
-
-Terminal 4:
-
-```bash
-cd /Users/shivanshumangal/Coding/Projects/universal-log-framework/ingestion
-KAFKA_BROKERS=localhost:9092 \
-CLICKHOUSE_ADDR=localhost:9000 \
-CLICKHOUSE_DATABASE=logs \
-CLICKHOUSE_USERNAME=default \
-CLICKHOUSE_PASSWORD=changeme \
-./bin/sink
-```
-
-### 7. Run the inferred-log sink
-
-Terminal 5:
-
-```bash
-cd /Users/shivanshumangal/Coding/Projects/universal-log-framework/ingestion
-KAFKA_BROKERS=localhost:9092 \
-KAFKA_INFERRED_TOPIC=inferred-logs \
-CLICKHOUSE_ADDR=localhost:9000 \
-CLICKHOUSE_DATABASE=logs \
-CLICKHOUSE_USERNAME=default \
-CLICKHOUSE_PASSWORD=changeme \
-./bin/inferredsink
-```
-
-`inferredsink` consumes `inferred-logs`, stores high-confidence events in `parsed_logs`, and stores lower-confidence events in `review_queue`.
-
-### 8. Run the inference API
-
-The checked-in [inference/.env](inference/.env) is configured for the Docker services when the API runs directly on macOS:
-
-```env
-KAFKA_BROKERS=localhost:9092
-CLICKHOUSE_URL=http://localhost:8123
-CLICKHOUSE_DATABASE=logs
-```
-
-Terminal 6:
-
-```bash
-cd /Users/shivanshumangal/Coding/Projects/universal-log-framework/inference
-source venv/bin/activate
-python -m pip install -r requirements.txt
-python -m uvicorn main:app --host 127.0.0.1 --port 8000
-```
-
-Check the API:
-
-```bash
-curl http://localhost:8000/health
-curl http://localhost:8000/inference/stats
-```
-
-The API also serves authenticated gateway routes under `/api`. The configured admin credentials are loaded from `inference/.env`.
-
-### 9. Run the dashboard
-
-Terminal 7:
-
-```bash
-cd /Users/shivanshumangal/Coding/Projects/universal-log-framework/dashboard
-npm install
-npm run dev
-```
-
-Open <http://localhost:5173>.
-
-### 10. Send a test log
-
-Terminal 8:
+### Send a test log
 
 ```bash
 printf '%s\n' '{"level":"info","msg":"hello"}' >> ingestion/configs/test.log
@@ -189,19 +73,21 @@ You can also send a syslog message:
 printf '%s\n' '<34>Oct 11 22:14:15 mymachine su: failed for lonvick' | nc -u -w 1 localhost 514
 ```
 
-### 11. Inspect ClickHouse
+### Inspect ClickHouse
 
 ```bash
+set -a; source .env; set +a
+
 docker exec ch-server clickhouse-client \
-  --user default --password changeme --database logs \
+  --user default --password "$CLICKHOUSE_PASSWORD" --database logs \
   --query 'SHOW TABLES'
 
 docker exec ch-server clickhouse-client \
-  --user default --password changeme --database logs \
+  --user default --password "$CLICKHOUSE_PASSWORD" --database logs \
   --query 'SELECT count() FROM parsed_logs'
 
 docker exec ch-server clickhouse-client \
-  --user default --password changeme --database logs \
+  --user default --password "$CLICKHOUSE_PASSWORD" --database logs \
   --query 'SELECT count() FROM review_queue'
 ```
 
@@ -228,10 +114,10 @@ CLICKHOUSE_ADDR=ch-server:9000
 
 ```bash
 # Service status
-docker compose -f infra/docker-compose.yml ps
+docker compose ps
 
 # ClickHouse HTTP health
-curl -sS -u default:changeme http://localhost:8123/ping
+curl -sS http://localhost:8123/ping
 
 # Kafka topics
 docker exec kafka /opt/kafka/bin/kafka-topics.sh --list --bootstrap-server localhost:9092
@@ -248,10 +134,10 @@ cd dashboard && npm run build
 
 ## Stop services
 
-Stop local processes with `Ctrl+C`, then stop Docker services:
+Stop the complete stack with:
 
 ```bash
-docker compose -f infra/docker-compose.yml down
+docker compose down
 ```
 
 Avoid `docker compose down -v` when you want to preserve the bind-mounted ClickHouse data in `infra/ch_data`.
@@ -260,4 +146,4 @@ Avoid `docker compose down -v` when you want to preserve the bind-mounted ClickH
 
 - [Ingestion README](ingestion/README.md)
 - [Inference README](inference/README.md)
-- [Infrastructure Compose file](infra/docker-compose.yml)
+- [Root Compose file](docker-compose.yml)
