@@ -114,11 +114,7 @@ def review_approve(event_id: str) -> dict[str, str]:
     )
 
     insert_query = "INSERT INTO parsed_logs FORMAT JSONEachRow"
-    _ch_query(insert_query, {"query": insert_query})
-    # Actually we need to send the JSON data in the body. Let me use a different approach.
-    # We'll send the query with FORMAT JSONEachRow and the data as body.
 
-    # Override to send data in POST body
     if not CLICKHOUSE_URL:
         raise HTTPException(status_code=503, detail="ClickHouse not configured")
 
