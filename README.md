@@ -1,4 +1,4 @@
-# Universal Log Framework
+#Universal Log Framework
 
 A local log pipeline that collects events, parses known formats, infers fields for unknown logs, stores results in ClickHouse, and exposes a Python API for the dashboard.
 
