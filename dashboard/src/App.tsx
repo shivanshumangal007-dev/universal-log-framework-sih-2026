@@ -1,17 +1,16 @@
-import { useState, useCallback, useEffect } from "react";
+import { useCallback, useEffect } from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { api } from "./lib/api";
 import { useAuth } from "./hooks/useAuth";
 import Layout from "./components/Layout";
 import LoginPage from "./pages/LoginPage";
+import HomePage from "./pages/HomePage";
 import DashboardPage from "./pages/DashboardPage";
 import LogsPage from "./pages/LogsPage";
 import ReviewPage from "./pages/ReviewPage";
 
-type Page = "dashboard" | "logs" | "review";
-
 export default function App() {
   const { ready, login, logout, isAuthenticated } = useAuth();
-  const [page, setPage] = useState<Page>("dashboard");
 
   useEffect(() => {
     document.title = "Universal Log Dashboard";
@@ -37,10 +36,16 @@ export default function App() {
   }
 
   return (
-    <Layout active={page} onNavigate={setPage} onLogout={logout}>
-      {page === "dashboard" && <DashboardPage />}
-      {page === "logs" && <LogsPage />}
-      {page === "review" && <ReviewPage />}
-    </Layout>
+    <BrowserRouter>
+      <Layout onLogout={logout}>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/logs" element={<LogsPage />} />
+          <Route path="/review" element={<ReviewPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Layout>
+    </BrowserRouter>
   );
 }

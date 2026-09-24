@@ -1,5 +1,7 @@
 import { useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
+  Home,
   LayoutDashboard,
   FileText,
   ClipboardList,
@@ -7,23 +9,22 @@ import {
   Menu,
   Activity } from "lucide-react";
 
-type Page = "dashboard" | "logs" | "review";
-
 interface LayoutProps {
-  active: Page;
-  onNavigate: (page: Page) => void;
   onLogout: () => void;
   children: React.ReactNode;
 }
 
-const navItems: { key: Page; label: string; icon: React.ElementType }[] = [
-  { key: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { key: "logs", label: "Parsed Logs", icon: FileText },
-  { key: "review", label: "Review Queue", icon: ClipboardList },
+const navItems = [
+  { path: "/", label: "Home", icon: Home },
+  { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { path: "/logs", label: "Parsed Logs", icon: FileText },
+  { path: "/review", label: "Review Queue", icon: ClipboardList },
 ];
 
-export default function Layout({ active, onNavigate, onLogout, children }: LayoutProps) {
+export default function Layout({ onLogout, children }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
 
   return (
     <div className="flex h-screen overflow-hidden bg-white">
@@ -51,13 +52,13 @@ export default function Layout({ active, onNavigate, onLogout, children }: Layou
 
         <nav className="flex-1 space-y-1 px-3 py-4">
           {navItems.map((item) => {
-            const isActive = active === item.key;
+            const isActive = location.pathname === item.path;
             const Icon = item.icon;
             return (
               <button
-                key={item.key}
+                key={item.path}
                 onClick={() => {
-                  onNavigate(item.key);
+                  navigate(item.path);
                   setSidebarOpen(false);
                 }}
                 className={[
