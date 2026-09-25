@@ -22,6 +22,7 @@ from config import (
     KAFKA_UNKNOWN_TOPIC,
 )
 from engine import infer_fields
+from shape import compute_shape
 
 
 WINDOW_LIMIT = 50
@@ -59,24 +60,36 @@ def _prune(window: deque[WindowLine], now: datetime) -> None:
         window.popleft()
 
 
-def _lookup_learned_schema(source: str) -> tuple[list[str], str] | None:
-    """Check if a human has already corrected this exact source before.
+def _lookup_learned_schema(
+    source: str, raw_line: str
+) -> tuple[list[str], str] | None:
+    """Find a learned schema whose source AND shape match this incoming line.
 
-    Returns (ordered_field_names, delimiter_used) if a learned schema
-    exists, else None. This is a pure bonus lookup — ANY failure here
-    (ClickHouse unreachable, table doesn't exist yet, bad response)
-    must fall back to None so the caller uses the generic inference
-    engine instead. A broken learning feature must never break the
-    baseline pipeline that already works.
+    Queries ALL stored schemas for this source, then for each candidate row
+    splits raw_line with that row's delimiter, computes the structural shape,
+    and returns the first match.  Returns None when:
+      - no row exists for this source at all
+      - no stored shape matches the incoming line's computed shape
+      - any exception occurs (ClickHouse unreachable, table missing, etc.)
+
+    This is the critical fix for both confirmed bugs:
+      Bug 1 — same-length line with renamed key=value fields: shapes differ
+               because kv slot labels include the key name (kv:person ≠ kv:user)
+      Bug 2 — different-length line from same source: token count prefix
+               differs ("3|..." ≠ "5|..."), so no match, no force-map.
+
+    Fail-open: ANY failure here must return None so the caller falls back to
+    the generic inference engine.  A broken learning feature must never break
+    the baseline pipeline.
     """
     if not CLICKHOUSE_URL:
         return None
     try:
         safe_source = source.replace("'", "\\'")
         query = (
-            "SELECT field_mapping_json, delimiter_used FROM source_schemas "
+            "SELECT delimiter_used, shape, field_mapping_json FROM source_schemas_v2 "
             f"FINAL WHERE source = '{safe_source}' "
-            "ORDER BY updated_at DESC LIMIT 1"
+            "ORDER BY updated_at DESC"
         )
         query_params: dict[str, str] = {
             "database": CLICKHOUSE_DATABASE,
@@ -100,9 +113,26 @@ def _lookup_learned_schema(source: str) -> tuple[list[str], str] | None:
             body = resp.read().decode("utf-8").strip()
             if not body:
                 return None
-            row = json.loads(body.splitlines()[0])
-            field_names = json.loads(row["field_mapping_json"])
-            return field_names, row["delimiter_used"]
+            for line in body.splitlines():
+                row = json.loads(line)
+                delimiter_used = row["delimiter_used"]
+                # Split raw_line with this candidate row's delimiter —
+                # must mirror the exact same split+strip+filter logic used
+                # in gateway.py's correction branch and in the apply-path
+                # below, so the three call sites stay consistent.
+                if delimiter_used == " ":
+                    candidate_tokens = raw_line.split()
+                else:
+                    candidate_tokens = [
+                        t.strip() for t in raw_line.split(delimiter_used)
+                    ]
+                candidate_tokens = [t for t in candidate_tokens if t]
+                candidate_shape = compute_shape(candidate_tokens)
+                if candidate_shape == row["shape"]:
+                    return json.loads(row["field_mapping_json"]), delimiter_used
+            # No stored shape matched this line — fall through to generic engine.
+            # This is the fix: previously the first row was always returned.
+            return None
     except Exception:
         return None
 
@@ -117,7 +147,7 @@ def process_event(
     raw_line = str(event["raw_line"])
     observed_at = seen_at or _now()
 
-    learned = _lookup_learned_schema(source)
+    learned = _lookup_learned_schema(source, raw_line)
 
     with _windows_lock:
         window = _windows[source]

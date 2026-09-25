@@ -14,6 +14,7 @@ from config import (
     CLICKHOUSE_URL,
     CLICKHOUSE_USER,
 )
+from shape import compute_shape
 
 router = APIRouter(prefix="/api", dependencies=[Depends(get_current_admin)])
 
@@ -89,37 +90,46 @@ def review_queue(
 
 
 def _ensure_schema_table() -> None:
-    """Create the learned-schema table if it doesn't exist yet.
+    """Create the learned-schema table (v2) if it doesn't exist yet.
 
-    Cheap to call on every correction (CREATE TABLE IF NOT EXISTS) —
-    avoids needing separate startup-ordering logic for this table.
-    ReplacingMergeTree keyed by source + updated_at: querying with
-    FINAL (or ORDER BY updated_at DESC LIMIT 1) always gets the most
-    recent human-confirmed schema for that source.
+    Uses source_schemas_v2 (new table name) to avoid conflicting with the
+    old source_schemas schema on existing deployments.  The extra `shape`
+    column and the compound ORDER BY (source, shape) mean each distinct
+    structural layout of log lines from a source gets its own row, so the
+    mapping is never applied to lines whose token count or key names differ
+    from the training example.
     """
     _ch_query(
-        "CREATE TABLE IF NOT EXISTS source_schemas ("
+        "CREATE TABLE IF NOT EXISTS source_schemas_v2 ("
         "source String, "
+        "shape String, "
         "delimiter_used String, "
         "field_mapping_json String, "
         "updated_at DateTime"
-        ") ENGINE = ReplacingMergeTree(updated_at) ORDER BY source"
+        ") ENGINE = ReplacingMergeTree(updated_at) ORDER BY (source, shape)"
     )
 
 
-def _learn_schema(source: str, delimiter_used: str, field_names_ordered: list[str]) -> None:
-    """Remember a human-corrected field mapping for this source.
+def _learn_schema(
+    source: str,
+    shape: str,
+    delimiter_used: str,
+    field_names_ordered: list[str],
+) -> None:
+    """Remember a human-corrected field mapping for this source+shape pair.
 
-    field_names_ordered is positional — index 0 is whatever field name
-    the admin gave the first delimiter-split token, etc. — so future
-    raw lines from the same source can be split the same way and get
-    the same names applied, without re-running the generic guesser.
+    field_names_ordered is positional (index 0 = first delimiter-split token,
+    etc.).  The shape column ensures the mapping is only applied to incoming
+    lines whose structural signature (token count + per-position slot types)
+    matches this training example, preventing false force-maps when key names
+    or token counts differ (Bug 1 and Bug 2 fix).
     """
     _ensure_schema_table()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     row = json.dumps(
         {
             "source": source,
+            "shape": shape,
             "delimiter_used": delimiter_used,
             "field_mapping_json": json.dumps(field_names_ordered, ensure_ascii=False),
             "updated_at": now,
@@ -132,7 +142,7 @@ def _learn_schema(source: str, delimiter_used: str, field_names_ordered: list[st
 
     url = CLICKHOUSE_URL.rstrip("/") + "/"
     query_params: dict[str, str] = {
-        "query": "INSERT INTO source_schemas FORMAT JSONEachRow",
+        "query": "INSERT INTO source_schemas_v2 FORMAT JSONEachRow",
         "database": CLICKHOUSE_DATABASE,
         "default_format": "JSONEachRow",
     }
@@ -244,6 +254,12 @@ def review_approve(event_id: str, payload: CorrectionPayload | None = None) -> d
                 tokens = [t.strip() for t in raw_line.split(best_delim)]
             tokens = [t for t in tokens if t]
 
+            # --- Step 2b: compute shape of the original raw_line ---
+            # Must happen after tokenisation (same split+strip logic) so
+            # the stored shape is consistent with what _lookup_learned_schema
+            # will compute on future lines using the same delimiter.
+            shape = compute_shape(tokens)
+
             # --- Step 3: Match each token to its corrected field ---
             # Build a position-to-field mapping
             used_fields: set[str] = set()
@@ -295,7 +311,7 @@ def review_approve(event_id: str, payload: CorrectionPayload | None = None) -> d
                     else:
                         position_fields.append(f"field_{i}")
 
-            _learn_schema(row["source"], best_delim, position_fields)
+            _learn_schema(row["source"], shape, best_delim, position_fields)
         except Exception:
             pass  # learning is a bonus on top of approve — never let it block the approve itself
     else:
